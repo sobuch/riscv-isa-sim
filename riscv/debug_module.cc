@@ -34,7 +34,7 @@ static unsigned field_width(unsigned n)
 debug_module_t::debug_module_t(sim_t *sim, const debug_module_config_t &config) :
   nprocs(sim->nprocs()),
   config(config),
-  program_buffer_bytes(4 + 4*config.progbufsize),
+  program_buffer_bytes(config.impebreak ? 4 : 0 + 4*config.progbufsize),
   debug_progbuf_start(debug_data_start - program_buffer_bytes),
   debug_abstract_start(debug_progbuf_start - debug_abstract_size*4),
   custom_base(0),
@@ -56,10 +56,13 @@ debug_module_t::debug_module_t(sim_t *sim, const debug_module_config_t &config) 
 
   memset(debug_rom_flags, 0, sizeof(debug_rom_flags));
   memset(program_buffer, 0, program_buffer_bytes);
-  program_buffer[4*config.progbufsize] = ebreak();
-  program_buffer[4*config.progbufsize+1] = ebreak() >> 8;
-  program_buffer[4*config.progbufsize+2] = ebreak() >> 16;
-  program_buffer[4*config.progbufsize+3] = ebreak() >> 24;
+
+  if (config.impebreak) {
+    program_buffer[4*config.progbufsize] = ebreak();
+    program_buffer[4*config.progbufsize+1] = ebreak() >> 8;
+    program_buffer[4*config.progbufsize+2] = ebreak() >> 16;
+    program_buffer[4*config.progbufsize+3] = ebreak() >> 24;
+  }
   memset(dmdata, 0, sizeof(dmdata));
 
   write32(debug_rom_whereto, 0,
@@ -87,7 +90,7 @@ void debug_module_t::reset()
   dmcontrol = {0};
 
   dmstatus = {0};
-  dmstatus.impebreak = true;
+  dmstatus.impebreak = config.impebreak;
   dmstatus.authenticated = !config.require_authentication;
   dmstatus.version = 2;
 
@@ -98,18 +101,14 @@ void debug_module_t::reset()
   abstractauto = {0};
 
   sbcs = {0};
-  if (config.max_bus_master_bits > 0) {
+  if (config.bus_master_bits) {
     sbcs.version = 1;
     sbcs.asize = sizeof(reg_t) * 8;
   }
-  if (config.max_bus_master_bits >= 64)
-    sbcs.access64 = true;
-  if (config.max_bus_master_bits >= 32)
-    sbcs.access32 = true;
-  if (config.max_bus_master_bits >= 16)
-    sbcs.access16 = true;
-  if (config.max_bus_master_bits >= 8)
-    sbcs.access8 = true;
+  sbcs.access64 = config.bus_master_bits & 64;
+  sbcs.access32 = config.bus_master_bits & 32;
+  sbcs.access16 = config.bus_master_bits & 16;
+  sbcs.access8 = config.bus_master_bits & 8;
 
   challenge = random();
 }
@@ -292,7 +291,7 @@ unsigned debug_module_t::sb_access_bits()
 
 void debug_module_t::sb_autoincrement()
 {
-  if (!sbcs.autoincrement || !config.max_bus_master_bits)
+  if (!sbcs.autoincrement || !config.bus_master_bits)
     return;
 
   uint64_t value = sbaddress[0] + sb_access_bits() / 8;
@@ -314,13 +313,13 @@ void debug_module_t::sb_read()
 {
   reg_t address = ((uint64_t) sbaddress[1] << 32) | sbaddress[0];
   try {
-    if (sbcs.sbaccess == 0 && config.max_bus_master_bits >= 8) {
+    if (sbcs.sbaccess == 0 && config.bus_master_bits & 8) {
       sbdata[0] = sim->debug_mmu->load_uint8(address);
-    } else if (sbcs.sbaccess == 1 && config.max_bus_master_bits >= 16) {
+    } else if (sbcs.sbaccess == 1 && config.bus_master_bits & 16) {
       sbdata[0] = sim->debug_mmu->load_uint16(address);
-    } else if (sbcs.sbaccess == 2 && config.max_bus_master_bits >= 32) {
+    } else if (sbcs.sbaccess == 2 && config.bus_master_bits & 32) {
       sbdata[0] = sim->debug_mmu->load_uint32(address);
-    } else if (sbcs.sbaccess == 3 && config.max_bus_master_bits >= 64) {
+    } else if (sbcs.sbaccess == 3 && config.bus_master_bits & 64) {
       uint64_t value = sim->debug_mmu->load_uint64(address);
       sbdata[0] = value;
       sbdata[1] = value >> 32;
@@ -336,13 +335,13 @@ void debug_module_t::sb_write()
 {
   reg_t address = ((uint64_t) sbaddress[1] << 32) | sbaddress[0];
   D(fprintf(stderr, "sb_write() 0x%x @ 0x%lx\n", sbdata[0], address));
-  if (sbcs.sbaccess == 0 && config.max_bus_master_bits >= 8) {
+  if (sbcs.sbaccess == 0 && config.bus_master_bits & 8) {
     sim->debug_mmu->store_uint8(address, sbdata[0]);
-  } else if (sbcs.sbaccess == 1 && config.max_bus_master_bits >= 16) {
+  } else if (sbcs.sbaccess == 1 && config.bus_master_bits & 16) {
     sim->debug_mmu->store_uint16(address, sbdata[0]);
-  } else if (sbcs.sbaccess == 2 && config.max_bus_master_bits >= 32) {
+  } else if (sbcs.sbaccess == 2 && config.bus_master_bits & 32) {
     sim->debug_mmu->store_uint32(address, sbdata[0]);
-  } else if (sbcs.sbaccess == 3 && config.max_bus_master_bits >= 64) {
+  } else if (sbcs.sbaccess == 3 && config.bus_master_bits & 64) {
     sim->debug_mmu->store_uint64(address,
         (((uint64_t) sbdata[1]) << 32) | sbdata[0]);
   } else {

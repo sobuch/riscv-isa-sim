@@ -55,8 +55,7 @@ static void help(int exit_code = 1)
   fprintf(stderr, "  --bootargs=<args>     Provide custom bootargs for kernel [default: console=hvc0 earlycon=sbi]\n");
   fprintf(stderr, "  --real-time-clint     Increment clint time at real-time rate\n");
   fprintf(stderr, "  --dm-progsize=<words> Progsize for the debug module [default 2]\n");
-  fprintf(stderr, "  --dm-sba=<bits>       Debug bus master supports up to "
-      "<bits> wide accesses [default 0]\n");
+  fprintf(stderr, "  --dm-sba=<bits>       Debug bus master supports <bits> wide accesses [default 0]\n");
   fprintf(stderr, "  --dm-auth             Debug module requires debugger to authenticate\n");
   fprintf(stderr, "  --dmi-rti=<n>         Number of Run-Test/Idle cycles "
       "required for a DMI access [default 0]\n");
@@ -65,6 +64,7 @@ static void help(int exit_code = 1)
   fprintf(stderr, "  --dm-no-hasel         Debug module supports hasel\n");
   fprintf(stderr, "  --dm-no-abstract-csr  Debug module won't support abstract to authenticate\n");
   fprintf(stderr, "  --dm-no-halt-groups   Debug module won't support halt groups\n");
+  fprintf(stderr, "  --dm-no-impebreak     Debug module won't support implicit ebreak\n");
 
   exit(exit_code);
 }
@@ -216,12 +216,13 @@ int main(int argc, char** argv)
   unsigned dmi_rti = 0;
   debug_module_config_t dm_config = {
     .progbufsize = 2,
-    .max_bus_master_bits = 0,
+    .bus_master_bits = 0,
     .require_authentication = false,
     .abstract_rti = 0,
     .support_hasel = true,
     .support_abstract_csr_access = true,
-    .support_haltgroups = true
+    .support_haltgroups = true,
+    .impebreak = true
   };
   std::vector<int> hartids;
 
@@ -318,8 +319,10 @@ int main(int argc, char** argv)
   });
   parser.option(0, "dm-progsize", 1,
       [&](const char* s){dm_config.progbufsize = atoi(s);});
+  parser.option(0, "dm-no-impebreak", 0,
+      [&](const char* s){dm_config.impebreak = false;});
   parser.option(0, "dm-sba", 1,
-      [&](const char* s){dm_config.max_bus_master_bits = atoi(s);});
+      [&](const char* s){dm_config.bus_master_bits |= atoi(s);});
   parser.option(0, "dm-auth", 0,
       [&](const char* s){dm_config.require_authentication = true;});
   parser.option(0, "dmi-rti", 1,
